@@ -2,10 +2,12 @@ import express from 'express';
 import multer from 'multer';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import cors from 'cors';
 
 dotenv.config();
 
 const app = express();
+
 const port = process.env.PORT || 3000;
 
 // Inicializar el cliente de Gemini (busca automáticamente la variable GEMINI_API_KEY)
@@ -13,6 +15,36 @@ const ai = new GoogleGenAI();
 
 // Configurar multer para almacenar la imagen temporalmente en memoria
 const upload = multer({ storage: multer.memoryStorage() });
+
+const allowedOrigins = [
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'http://localhost:8080',
+  'http://localhost:8100',
+  'http://localhost:50036', // flutter chrome
+  'http://localhost:50037', // flutter chrome
+  'http://192.168.1.134:8100',
+  'https://192.168.1.134:8100',
+  'https://franfolio.dev'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
+
 
 // Middleware para parsear JSON y URL-encoded
 app.use(express.json());
@@ -58,7 +90,11 @@ async function retryWithBackoff(fn, maxRetries = 3, baseDelayMs = 1000) {
   throw lastError;
 }
 
-app.get('/api', (req, res) => {
+app.get('/gemini/api', cors(corsOptions), (req, res) => {
+  res.json({ message: 'API de análisis de imágenes con Gemini' });
+});
+
+app.get('/gemini/', cors(corsOptions), (req, res) => {
   res.json({ message: 'API de análisis de imágenes con Gemini' });
 });
 
@@ -120,7 +156,7 @@ app.get('/api', (req, res) => {
 //   }
 // });
 
-app.post('/api/analizar-imagen', upload.single('imagen'), async (req, res) => {
+app.post('/gemini/api/analizar-imagen', cors(corsOptions), upload.single('imagen'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No se ha proporcionado ninguna imagen.' });
@@ -147,7 +183,6 @@ app.post('/api/analizar-imagen', upload.single('imagen'), async (req, res) => {
   "lineas": [
     {
       "cantidad": 0.0,
-      "descripcion": "",
       "precio_unitario": 0.0,
       "importe": 0.0,
       "peso_kg": 0.0
@@ -164,7 +199,7 @@ app.post('/api/analizar-imagen', upload.single('imagen'), async (req, res) => {
       }
     ]
   }
-}`;
+} REGLA: En cada línea, si hay precio unitario ponlo; si no aparece separado, asigna en "precio_unitario" el mismo valor que el "importe".`;
 
     // Llamada al modelo con retry automático
     const response = await retryWithBackoff(async () => {
