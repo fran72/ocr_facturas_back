@@ -90,12 +90,63 @@ async function retryWithBackoff(fn, maxRetries = 3, baseDelayMs = 1000) {
   throw lastError;
 }
 
+// Función para validar que la estructura JSON sea correcta
+function validarEstructuraFactura(datos) {
+  const errores = [];
+
+  // Validar estructura básica
+  if (!datos || typeof datos !== 'object') {
+    errores.push('La respuesta no es un objeto JSON');
+    return { valido: false, errores };
+  }
+
+  // Verificar que NO sea un array de texto (error común)
+  if (Array.isArray(datos.lineas_texto)) {
+    errores.push('Estructura inválida: contiene "lineas_texto" en lugar de estructura JSON correcta');
+    return { valido: false, errores };
+  }
+
+  // Validar propiedades principales
+  if (!datos.comercio || typeof datos.comercio !== 'object') {
+    errores.push('Falta o es inválida la propiedad "comercio"');
+  }
+
+  if (!datos.factura || typeof datos.factura !== 'object') {
+    errores.push('Falta o es inválida la propiedad "factura"');
+  }
+
+  if (!Array.isArray(datos.lineas)) {
+    errores.push('Falta o es inválida la propiedad "lineas" (debe ser array)');
+  } else {
+    // Validar estructura de cada línea
+    for (let i = 0; i < datos.lineas.length; i++) {
+      const linea = datos.lineas[i];
+      if (typeof linea !== 'object' || !('cantidad' in linea) || !('importe' in linea)) {
+        errores.push(`Línea ${i} no tiene estructura correcta (falta cantidad o importe)`);
+      }
+    }
+  }
+
+  if (!datos.totales || typeof datos.totales !== 'object') {
+    errores.push('Falta o es inválida la propiedad "totales"');
+  } else {
+    if (!Array.isArray(datos.totales.desglose_iva)) {
+      errores.push('Falta o es inválida la propiedad "totales.desglose_iva" (debe ser array)');
+    }
+  }
+
+  return {
+    valido: errores.length === 0,
+    errores
+  };
+}
+
 app.get('/gemini/api', cors(corsOptions), (req, res) => {
   res.json({ message: 'API de análisis de imágenes con Gemini' });
 });
 
 app.get('/gemini/', cors(corsOptions), (req, res) => {
-  res.json({ message: 'API de análisis de imágenes con Gemini' });
+  res.json({ message: 'API posha de análisis de imágenes con Gemini' });
 });
 
 // // Endpoint POST para procesar la imagen
@@ -164,8 +215,11 @@ app.post('/gemini/api/analizar-imagen', cors(corsOptions), upload.single('imagen
 
     const imagePart = bufferToGenerativePart(req.file.buffer, req.file.mimetype);
 
-    // Prompt estructurado para la factura si no envían otro por body
-    const prompt = req.body.prompt || `Analiza la siguiente imagen de una factura y devuelve la información estrictamente en formato JSON válido, siguiendo esta estructura de claves:
+    // Prompt ALTAMENTE ESTRUCTURADO para forzar JSON válido
+    const prompt = req.body.prompt || `INSTRUCCIÓN CRÍTICA: Devuelve ÚNICAMENTE un JSON válido. NO devuelvas texto, NO devuelvas explicaciones, NO devuelvas arrays de texto.
+
+Analiza la imagen de factura y extrae EXACTAMENTE esta estructura JSON (rellena campos vacíos con "" o 0.0):
+
 {
   "comercio": {
     "nombre": "",
@@ -199,25 +253,56 @@ app.post('/gemini/api/analizar-imagen', cors(corsOptions), upload.single('imagen
       }
     ]
   }
-} REGLA: En cada línea, si hay precio unitario ponlo; si no aparece separado, asigna en "precio_unitario" el mismo valor que el "importe".`;
+}
+
+REGLAS OBLIGATORIAS:
+1. NUNCA devuelvas arrays de texto tipo "lineas_texto"
+2. Solo devuelves JSON válido. Nada de explicaciones.
+3. Si falta información, usa "" para strings y 0.0 para números
+4. El array "lineas" DEBE contener objetos con cantidad, precio_unitario, importe, peso_kg
+5. El array "desglose_iva" DEBE contener objetos con porcentaje, base_imponible, cuota
+6. No necesitas campo "precio_unitario" - si no aparece separado, usa 0.0`;
 
     // Llamada al modelo con retry automático
     const response = await retryWithBackoff(async () => {
       return await ai.models.generateContent({
-        model: 'gemini-3.6-flash', // Cambiado para evitar errores 404 de versiones
+        model: 'gemini-3.6-flash',
         contents: [prompt, imagePart],
         config: {
-          responseMimeType: "application/json", // Fuerza la salida en JSON puro
+          responseMimeType: "application/json",
         },
       });
     });
 
-    // Parseamos directamente el texto devuelto a un objeto JSON de Node.js
-    const datosFactura = JSON.parse(response.text);
+    // Validar y parsear el JSON
+    let datosFactura;
+    try {
+      datosFactura = JSON.parse(response.text);
+    } catch (e) {
+      console.error('❌ Gemini devolvió texto inválido:', response.text.substring(0, 200));
+      return res.status(400).json({
+        success: false,
+        error: 'Gemini devolvió formato inválido. Intenta de nuevo.',
+        debug: response.text.substring(0, 200)
+      });
+    }
 
+    // Validar estructura OBLIGATORIA
+    const estructura_valida = validarEstructuraFactura(datosFactura);
+    if (!estructura_valida.valido) {
+      console.error('❌ Estructura inválida:', estructura_valida.errores);
+      return res.status(400).json({
+        success: false,
+        error: 'La respuesta de Gemini no tiene la estructura correcta',
+        errores: estructura_valida.errores,
+        respuesta_recibida: datosFactura
+      });
+    }
+
+    console.log('✅ Factura procesada correctamente');
     res.json({
       success: true,
-      data: datosFactura // Devolvemos el JSON estructurado directamente
+      data: datosFactura
     });
 
   } catch (error) {
