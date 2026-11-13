@@ -149,64 +149,6 @@ app.get('/gemini/', cors(corsOptions), (req, res) => {
   res.json({ message: 'API posha de análisis de imágenes con Gemini' });
 });
 
-// // Endpoint POST para procesar la imagen
-// app.post('/api/analizar-imagen', upload.single('imagen'), async (req, res) => {
-//   try {
-//     if (!req.file) {
-//       return res.status(400).json({ error: 'No se ha proporcionado ninguna imagen.' });
-//     }
-
-//     const imagePart = bufferToGenerativePart(req.file.buffer, req.file.mimetype);
-//     const prompt = req.body.prompt || "Extrae y devuelve todo el texto que aparece en esta imagen.";
-
-//     console.log('Prompt:', prompt);
-
-
-//     console.log('Imagen recibida:', req.file.originalname);
-
-
-//     // Llamada al modelo con retry automático
-//     const response = await retryWithBackoff(async () => {
-//       return await ai.models.generateContent({
-//         model: 'gemini-3.6-flash', // gemini-2.0-flash
-//         // model: 'gemini-3.8-flash', // gemini-2.0-flash
-//         contents: [prompt, imagePart],
-//         config: {
-//           responseMimeType: "application/json",
-//         },
-//       });
-//     });
-
-//     console.log('Respuesta del modelo:', response);
-
-//     res.json({
-//       success: true,
-//       texto: response.text
-//     });
-
-//   } catch (error) {
-//     console.error('Error al procesar la imagen:', error);
-
-//     // Manejo específico de errores
-//     const errorResponse = {
-//       error: 'Ocurrió un error al procesar la imagen con Gemini.',
-//       details: error.message
-//     };
-
-//     if (error.status === 'UNAVAILABLE' || error.code === 503) {
-//       errorResponse.error = 'El servicio de Gemini está temporalmente no disponible. Intenta de nuevo en unos momentos.';
-//       return res.status(503).json(errorResponse);
-//     }
-
-//     if (error.code === 429) {
-//       errorResponse.error = 'Demasiadas solicitudes. Por favor, intenta de nuevo más tarde.';
-//       return res.status(429).json(errorResponse);
-//     }
-
-//     res.status(500).json(errorResponse);
-//   }
-// });
-
 app.post('/gemini/api/analizar-imagen', cors(corsOptions), upload.single('imagen'), async (req, res) => {
   try {
     if (!req.file) {
@@ -237,6 +179,7 @@ Analiza la imagen de factura y extrae EXACTAMENTE esta estructura JSON (rellena 
   "lineas": [
     {
       "cantidad": 0.0,
+      "descripcion": "",
       "precio_unitario": 0.0,
       "importe": 0.0,
       "peso_kg": 0.0
